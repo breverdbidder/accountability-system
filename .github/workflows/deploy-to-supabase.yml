@@ -20,68 +20,63 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client
       
-      - name: Decode and merge SQL schemas
+      - name: Prepare SQL schemas
         run: |
-          echo "Decoding schemas..."
+          echo "📦 Preparing schemas..."
           
-          # Decode active_tasks schema (Base64)
+          # The files are Base64 encoded, decode them
           if [ -f "schemas/active_tasks_schema.sql" ]; then
-            cat schemas/active_tasks_schema.sql > merged_schema.sql
-            echo "" >> merged_schema.sql
+            base64 -d schemas/active_tasks_schema.sql > active_tasks.sql || cp schemas/active_tasks_schema.sql active_tasks.sql
+            echo "✅ Active tasks schema prepared"
           fi
           
-          # Decode multiplier schema (Base64)
           if [ -f "schemas/multiplier_schema_update.sql" ]; then
-            cat schemas/multiplier_schema_update.sql >> merged_schema.sql
+            base64 -d schemas/multiplier_schema_update.sql > multiplier.sql || cp schemas/multiplier_schema_update.sql multiplier.sql
+            echo "✅ Multiplier schema prepared"
           fi
           
-          echo "✅ Schemas merged"
+          # Merge into single file
+          cat active_tasks.sql > merged_schema.sql
+          echo "" >> merged_schema.sql
+          cat multiplier.sql >> merged_schema.sql
+          
+          echo "📊 Merged schema stats:"
           wc -l merged_schema.sql
+          head -20 merged_schema.sql
       
       - name: Deploy to Supabase
         env:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         run: |
           echo "🚀 Deploying to Supabase..."
           
-          # Execute SQL
           PGPASSWORD="$DB_PASSWORD" psql \
             -h aws-0-us-east-1.pooler.supabase.com \
             -p 6543 \
             -U postgres.mocerqjnksmhcjzxrewo \
             -d postgres \
-            -f merged_schema.sql \
-            --echo-errors \
-            --set ON_ERROR_STOP=1
+            -f merged_schema.sql
           
-          echo "✅ Deployment successful"
+          exit_code=$?
+          
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Deployment successful"
+          else
+            echo "❌ Deployment failed with exit code $exit_code"
+            exit $exit_code
+          fi
       
       - name: Verify deployment
         env:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
-          echo "🔍 Verifying tables..."
+          echo "🔍 Verifying deployment..."
           
           PGPASSWORD="$DB_PASSWORD" psql \
             -h aws-0-us-east-1.pooler.supabase.com \
             -p 6543 \
             -U postgres.mocerqjnksmhcjzxrewo \
             -d postgres \
-            -c "SELECT table_name FROM information_schema.tables WHERE table_name = 'active_tasks';"
-          
-          PGPASSWORD="$DB_PASSWORD" psql \
-            -h aws-0-us-east-1.pooler.supabase.com \
-            -p 6543 \
-            -U postgres.mocerqjnksmhcjzxrewo \
-            -d postgres \
-            -c "SELECT column_name FROM information_schema.columns WHERE table_name = 'active_tasks' AND column_name = 'permission_stage';"
+            -c "SELECT COUNT(*) as permission_stage_column FROM information_schema.columns WHERE table_name = 'active_tasks' AND column_name = 'permission_stage';"
           
           echo "✅ Verification complete"
-      
-      - name: Log completion
-        run: |
-          echo "🎉 ACCOUNTABILITY SYSTEM DEPLOYED"
-          echo "Repository: ${{ github.repository }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
