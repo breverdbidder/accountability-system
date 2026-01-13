@@ -1,0 +1,87 @@
+name: Deploy Accountability System to Supabase
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'schemas/**'
+      - '.github/workflows/deploy-to-supabase.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      
+      - name: Decode and merge SQL schemas
+        run: |
+          echo "Decoding schemas..."
+          
+          # Decode active_tasks schema (Base64)
+          if [ -f "schemas/active_tasks_schema.sql" ]; then
+            cat schemas/active_tasks_schema.sql > merged_schema.sql
+            echo "" >> merged_schema.sql
+          fi
+          
+          # Decode multiplier schema (Base64)
+          if [ -f "schemas/multiplier_schema_update.sql" ]; then
+            cat schemas/multiplier_schema_update.sql >> merged_schema.sql
+          fi
+          
+          echo "✅ Schemas merged"
+          wc -l merged_schema.sql
+      
+      - name: Deploy to Supabase
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        run: |
+          echo "🚀 Deploying to Supabase..."
+          
+          # Execute SQL
+          PGPASSWORD="$DB_PASSWORD" psql \
+            -h aws-0-us-east-1.pooler.supabase.com \
+            -p 6543 \
+            -U postgres.mocerqjnksmhcjzxrewo \
+            -d postgres \
+            -f merged_schema.sql \
+            --echo-errors \
+            --set ON_ERROR_STOP=1
+          
+          echo "✅ Deployment successful"
+      
+      - name: Verify deployment
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          echo "🔍 Verifying tables..."
+          
+          PGPASSWORD="$DB_PASSWORD" psql \
+            -h aws-0-us-east-1.pooler.supabase.com \
+            -p 6543 \
+            -U postgres.mocerqjnksmhcjzxrewo \
+            -d postgres \
+            -c "SELECT table_name FROM information_schema.tables WHERE table_name = 'active_tasks';"
+          
+          PGPASSWORD="$DB_PASSWORD" psql \
+            -h aws-0-us-east-1.pooler.supabase.com \
+            -p 6543 \
+            -U postgres.mocerqjnksmhcjzxrewo \
+            -d postgres \
+            -c "SELECT column_name FROM information_schema.columns WHERE table_name = 'active_tasks' AND column_name = 'permission_stage';"
+          
+          echo "✅ Verification complete"
+      
+      - name: Log completion
+        run: |
+          echo "🎉 ACCOUNTABILITY SYSTEM DEPLOYED"
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
